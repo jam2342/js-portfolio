@@ -188,7 +188,7 @@ export const projects: Project[] = [
     ],
     href: "/work/notetaker/",
     privateRepo: true,
-    featured: false,
+    featured: true,
   },
 ];
 

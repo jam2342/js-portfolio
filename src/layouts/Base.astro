@@ -12,6 +12,8 @@ interface Props {
 
 const { title, description = site.description, progress = false } = Astro.props;
 const pathname = Astro.url.pathname;
+const origin = Astro.site ?? new URL("https://example.com");
+const ogImage = new URL("/og.png", origin).href;
 const isActive = (href: string) =>
   href === "/" ? pathname === "/" : pathname.startsWith(href);
 ---
@@ -24,10 +26,20 @@ const isActive = (href: string) =>
     <title>{title}</title>
     <meta name="description" content={description} />
     <meta name="author" content={site.name} />
-    <link rel="canonical" href={new URL(pathname, Astro.site ?? "https://example.com")} />
+    <link rel="canonical" href={new URL(pathname, origin)} />
     <meta property="og:title" content={title} />
     <meta property="og:description" content={description} />
     <meta property="og:type" content="website" />
+    <meta property="og:url" content={new URL(pathname, origin).href} />
+    <meta property="og:site_name" content={site.name} />
+    <meta property="og:image" content={ogImage} />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta property="og:image:alt" content={`${site.name}, ${site.role}`} />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content={title} />
+    <meta name="twitter:description" content={description} />
+    <meta name="twitter:image" content={ogImage} />
     <link
       rel="icon"
       href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='14' fill='%2316161a'/%3E%3Ctext x='50' y='68' font-family='ui-monospace,monospace' font-size='52' fill='%23f7f5f1' text-anchor='middle'%3EJM%3C/text%3E%3C/svg%3E"

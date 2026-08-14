@@ -126,8 +126,9 @@ export const competitions: Competition[] = [
   {
     name: "Stanford Math Tournament",
     result: "Participant",
-    year: "",
-    detail: "Competed in the tournament.",
+    year: "2026",
+    detail:
+      "Competed in the 2026 tournament, an invitational contest run by Stanford students covering algebra, geometry, number theory, and combinatorics.",
   },
 ];
 

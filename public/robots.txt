@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://portfolio-wine-three-iox2jn0bx6.vercel.app/sitemap-index.xml

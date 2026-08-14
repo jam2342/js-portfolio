@@ -100,7 +100,7 @@ const checks = [
       state = "audited";
       host.className = "lab is-audited is-rolled-back";
       score.textContent = "0 / 5 compliant · restored";
-      writeLog(["Rollback manifest loaded.", "5 original values restored—not baseline defaults.", "Verification pass matches pre-run fingerprint."]);
+      writeLog(["Rollback manifest loaded.", "5 original values restored, not baseline defaults.", "Verification pass matches pre-run fingerprint."]);
       artifact.textContent = "rollback verified · original state restored";
       apply.disabled = false; rollback.disabled = true;
     }

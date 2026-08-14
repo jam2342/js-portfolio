@@ -38,10 +38,10 @@ const project = projects.find((p) => p.id === "notetaker")!;
       <EvidenceStrip
         label="Notetaker evidence"
         items={[
-          { value: "2 signals", label: "Zoom detection", detail: "Helper process plus window title" },
-          { value: "16 kHz", label: "Local audio", detail: "System and microphone mixed to mono WAV" },
-          { value: "1 text pass", label: "Summarization", detail: "No audio leaves the machine" },
-          { value: "3 harnesses", label: "Focused checks", detail: "Detection, title safety, and WAV output" },
+          { value: "~1,300", label: "Swift lines", detail: "Five source files plus three test harnesses" },
+          { value: "0.78 → 0.0", label: "Amplitude bug", detail: "One flag silently killed system audio" },
+          { value: "2 signals", label: "Meeting detection", detail: "Helper process plus window title" },
+          { value: "1 text pass", label: "Leaves the Mac", detail: "Transcript only, after you stop" },
         ]}
       />
     </div>
@@ -54,6 +54,23 @@ const project = projects.find((p) => p.id === "notetaker")!;
         different events. Seeing Zoom's in-meeting helper process or a live
         meeting title is enough to show a prompt. It is never enough to begin capture.
       </p>
+      <p>
+        In the code there is exactly one path that begins capture, and it is
+        reachable from two places: the menu bar item you click, and the button
+        in a dialog you answered. Detection can raise that dialog. It cannot
+        answer it. The asymmetry is deliberate, because a recorder that starts
+        itself in a 1:1 or an interview is not a bug you get to apologize for
+        afterward.
+      </p>
+
+      <p>
+        Stopping is the opposite. Leaving the meeting ends the recording on its
+        own, since forgetting to press stop costs you nothing worse than a longer
+        file, while forgetting to press start costs you the meeting. Convenience
+        belongs on whichever side of a decision is harmless when it fires by
+        accident.
+      </p>
+
       <p>
         That distinction survives the whole design. Audio stays on the Mac.
         whisper.cpp produces a local transcript. Only after recording stops does
@@ -71,7 +88,7 @@ const project = projects.find((p) => p.id === "notetaker")!;
           <p class="mono">Capture</p>
           <h3 class="h-sm">ScreenCaptureKit</h3>
           <p>
-            The stream combines system audio—the people on the other side—with
+            The stream combines system audio, the people on the other side, with
             microphone input. A discarded 2×2 pixel region satisfies the capture
             API without turning the app into a screen recorder.
           </p>
@@ -97,13 +114,35 @@ const project = projects.find((p) => p.id === "notetaker")!;
     </section>
 
     <section class="wrap section narrow" aria-labelledby="verified">
-      <h2 class="h-lg sec-title" id="verified">The bugs that looked like success</h2>
+      <h2 class="h-lg sec-title" id="verified">The bug that looked like success</h2>
       <p>
-        Audio software can return a valid file while recording the wrong thing.
-        One ScreenCaptureKit flag produced exactly that failure: the WAV looked
-        normal but system-audio amplitude dropped to zero, leaving only the
-        microphone. The repository keeps a focused WAV harness because checking
-        that a file exists would have passed.
+        Audio software can hand back a perfectly valid file while recording the
+        wrong thing. ScreenCaptureKit has a flag called
+        <code>excludesCurrentProcessAudio</code>, and setting it true reads like
+        obvious hygiene: don't capture your own app's output. On macOS 26 it
+        silently kills the entire system-audio tap.
+      </p>
+
+      <p>
+        The measured peak amplitude of the system channel drops from 0.78 to
+        exactly 0.0. Every surface-level check still passes. The file exists, the
+        RIFF header is well formed, the duration is right, and the waveform looks
+        normal because your microphone is still feeding it. What you have lost is
+        every other participant. With headphones on, the failure is total and
+        completely invisible: you record yourself saying "mm-hm" for forty
+        minutes and nothing else.
+      </p>
+
+      <p>
+        That is the reason the WAV harness drives the writer with two synthetic
+        tones instead of asserting that a file was produced. It starts a 440 Hz
+        tone at zero seconds and an 880 Hz tone one second later, then measures
+        RMS in three windows. The first source alone, the overlap, and the second
+        source alone. The overlap has to be meaningfully louder than either tone
+        by itself, which is only true if mixing actually happened. It also checks
+        that summed peaks clamp instead of wrapping around, because a sign
+        inversion at the top of the range is the kind of thing you hear as a
+        click and never find by reading code.
       </p>
 
       <div class="checks">
@@ -118,6 +157,50 @@ const project = projects.find((p) => p.id === "notetaker")!;
           whisper.cpp does not provide reliable speaker diarization here, so the
           note prompt only attributes a statement when context makes the speaker
           clear. A missing label is more honest than a polished wrong one.
+        </p>
+      </details>
+    </section>
+
+    <section class="wrap section narrow" aria-labelledby="deadends">
+      <h2 class="h-lg sec-title" id="deadends">Two approaches that don't work</h2>
+
+      <p>
+        Both of these look correct in documentation and fail against a real
+        machine. They cost me more time than the parts that worked, so they are
+        written down.
+      </p>
+
+      <details class="tech">
+        <summary>Asking the audio system whether the microphone is in use</summary>
+        <p>
+          <code>kAudioDevicePropertyDeviceIsRunningSomewhere</code> sounds like
+          exactly the right meeting signal. If something is holding the
+          microphone, you are probably in a call, and it would work across every
+          platform at once without caring which app is running.
+        </p>
+        <p>
+          On macOS 26 it reports false while an application is actively
+          recording. I checked it against ffmpeg holding the microphone open, so
+          this is a measurement rather than an inference. Any detector built on
+          it would have failed closed and never prompted at all.
+        </p>
+      </details>
+
+      <details class="tech">
+        <summary>Reading Zoom's own meeting data</summary>
+        <p>
+          Zoom keeps meeting databases under its application support directory,
+          which would supply participant lists and real scheduled topics instead
+          of whatever the window happens to be called. Every one of those files
+          is encrypted on disk.
+        </p>
+        <p>
+          That leaves the window title as the only local source of a meeting
+          name. Getting participants would mean a Zoom OAuth application and
+          cloud API calls, which trades a local-only tool for one that needs
+          account credentials and network access. For an app whose entire premise
+          is that your audio never leaves the machine, that is a bad trade, so
+          the feature stays missing.
         </p>
       </details>
     </section>
@@ -171,6 +254,17 @@ const project = projects.find((p) => p.id === "notetaker")!;
   .checks > div { display: grid; grid-template-columns: 8rem 1fr; gap: 1rem; border-top: 1px solid var(--rule); padding-top: 0.8rem; }
   .checks .mono { color: var(--accent); font-size: 0.62rem; }
   .checks p { margin: 0; color: var(--ink-2); font-size: 0.9rem; }
+
+  code {
+    font-family: var(--mono);
+    font-size: 0.86em;
+    background: var(--accent-wash);
+    color: var(--accent-ink);
+    padding: 0.12em 0.36em;
+    border-radius: 2px;
+    /* Long API identifiers must not push the column wider on small screens. */
+    overflow-wrap: anywhere;
+  }
 
   .case-next { border-top: 1px solid var(--rule); }
   .next-link { display: grid; gap: 0.5rem; text-decoration: none; color: inherit; padding: 1.5rem 0; }

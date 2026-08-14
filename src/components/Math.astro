@@ -1,0 +1,131 @@
+---
+/**
+ * Lightweight mathematical typesetting.
+ *
+ * The site ships no JS math library. Equations are written as semantic HTML
+ * with a serif italic face for variables, which renders correctly everywhere
+ * and stays selectable, searchable, and screen-reader legible via the `label`.
+ *
+ * `display` centres the equation on its own line; otherwise it sits inline.
+ */
+
+interface Props {
+  /** Accessible plain-language reading of the expression. */
+  label: string;
+  display?: boolean;
+  /** Equation number shown in the right margin of a display equation. */
+  n?: string;
+}
+
+const { label, display = false, n } = Astro.props;
+const Tag = display ? "div" : "span";
+---
+
+<Tag
+  class:list={["math", { "math-display": display }]}
+  role="math"
+  aria-label={label}
+>
+  <span class="math-body"><slot /></span>
+  {display && n && <span class="math-n mono" aria-hidden="true">({n})</span>}
+</Tag>
+
+<style is:global>
+  .math {
+    font-family: var(--serif);
+    font-style: italic;
+    font-size: 1.06em;
+    line-height: 1.5;
+    white-space: nowrap;
+  }
+
+  .math-display {
+    display: flex;
+    align-items: baseline;
+    justify-content: center;
+    gap: 1rem;
+    margin: 1.6rem 0;
+    font-size: 1.2rem;
+    /* Long equations scroll rather than forcing the page wide. */
+    overflow-x: auto;
+    overflow-y: hidden;
+    padding-bottom: 0.2rem;
+  }
+
+  .math-display .math-body {
+    flex: 1;
+    text-align: center;
+  }
+
+  .math-n {
+    font-style: normal;
+    flex: none;
+    color: var(--ink-3);
+  }
+
+  /* Upright: operators, digits, and function names (d, E, Var, exp, ln). */
+  .math .op {
+    font-style: normal;
+  }
+
+  /* Subscripts and superscripts that don't disturb line height. */
+  .math sub,
+  .math sup {
+    font-size: 0.68em;
+    line-height: 0;
+    position: relative;
+  }
+
+  .math sub {
+    bottom: -0.18em;
+  }
+
+  .math sup {
+    top: -0.48em;
+  }
+
+  /* A fraction, built from two stacked cells.
+     `middle` puts the rule on the text's centre line, which is close enough
+     to the maths axis that it sits level with the surrounding operators. */
+  .math .frac {
+    display: inline-flex;
+    flex-direction: column;
+    vertical-align: middle;
+    text-align: center;
+    font-size: 0.82em;
+    line-height: 1.15;
+    margin: 0 0.22em;
+  }
+
+  .math .frac > span:first-child {
+    border-bottom: 1px solid currentColor;
+    padding: 0 0.32em 0.08em;
+  }
+
+  .math .frac > span:last-child {
+    padding: 0.08em 0.32em 0;
+  }
+
+  /* Sub/superscripts inside a fraction must not overlap the rule or each
+     other, so they sit closer to the baseline than they do in running text. */
+  .math .frac sub {
+    bottom: -0.1em;
+  }
+
+  .math .frac sup {
+    top: -0.32em;
+    font-size: 0.62em;
+  }
+
+  /* Square root with an overbar on the radicand. */
+  .math .sqrt::before {
+    content: "√";
+    font-style: normal;
+  }
+
+  .math .sqrt > span {
+    border-top: 1px solid currentColor;
+    padding: 0.08em 0.12em 0 0.06em;
+    margin-left: -0.06em;
+  }
+</style>

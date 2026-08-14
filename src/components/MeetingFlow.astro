@@ -1,0 +1,222 @@
+<div class="meeting-lab" data-meeting-lab>
+  <div class="lab-head">
+    <div>
+      <p class="mono">Interactive system trace</p>
+      <h3 class="h-md">From meeting signal to notes</h3>
+    </div>
+    <span class="state mono" data-state>Idle · not recording</span>
+  </div>
+
+  <div class="signal" aria-hidden="true" data-signal>
+    {Array.from({ length: 28 }, (_, i) => <i style={`--i:${i}`}></i>)}
+  </div>
+
+  <ol class="flow" role="list">
+    <li data-step="detect"><span class="mono">01</span><strong>Detect</strong><small>Zoom helper or window title</small></li>
+    <li data-step="consent"><span class="mono">02</span><strong>Ask</strong><small>Prompt; never auto-record</small></li>
+    <li data-step="capture"><span class="mono">03</span><strong>Capture locally</strong><small>System + mic → 16 kHz WAV</small></li>
+    <li data-step="notes"><span class="mono">04</span><strong>Write notes</strong><small>Transcript → decisions + actions</small></li>
+  </ol>
+
+  <div class="boundary" aria-label="Data boundary">
+    <div>
+      <span class="boundary-dot local" aria-hidden="true"></span>
+      <p><strong>Stays on this Mac</strong><br />Audio and whisper transcription</p>
+    </div>
+    <div>
+      <span class="boundary-dot sent" aria-hidden="true"></span>
+      <p><strong>Sent once</strong><br />Transcript text only, after recording stops</p>
+    </div>
+  </div>
+
+  <div class="controls" aria-label="Meeting simulation controls">
+    <button type="button" class="btn" data-action="join">Simulate joining Zoom</button>
+    <button type="button" class="btn btn-ghost" data-action="allow" disabled>Allow recording</button>
+    <button type="button" class="btn btn-ghost" data-action="stop" disabled>Stop & summarize</button>
+    <button type="button" class="reset mono" data-action="reset">Reset</button>
+  </div>
+
+  <div class="note-preview" data-note hidden>
+    <p class="mono">notes.md · generated after explicit stop</p>
+    <h4>Competition strategy sync</h4>
+    <div class="note-cols">
+      <p><strong>Decision</strong><br />Keep human approval in the auto-scout loop.</p>
+      <p><strong>Action</strong><br />Run the new calibration tests before Saturday.</p>
+    </div>
+  </div>
+</div>
+
+<script>
+  document.querySelectorAll<HTMLElement>("[data-meeting-lab]").forEach((root) => {
+    const state = root.querySelector<HTMLElement>("[data-state]");
+    const signal = root.querySelector<HTMLElement>("[data-signal]");
+    const note = root.querySelector<HTMLElement>("[data-note]");
+    const join = root.querySelector<HTMLButtonElement>("[data-action='join']")!;
+    const allow = root.querySelector<HTMLButtonElement>("[data-action='allow']")!;
+    const stop = root.querySelector<HTMLButtonElement>("[data-action='stop']")!;
+    const reset = root.querySelector<HTMLButtonElement>("[data-action='reset']")!;
+
+    const setStep = (name: string, on: boolean) => {
+      root.querySelector(`[data-step='${name}']`)?.classList.toggle("is-on", on);
+    };
+
+    const resetAll = () => {
+      ["detect", "consent", "capture", "notes"].forEach((s) => setStep(s, false));
+      if (state) state.textContent = "Idle · not recording";
+      signal?.classList.remove("is-live");
+      if (note) note.hidden = true;
+      join.disabled = false;
+      allow.disabled = true;
+      stop.disabled = true;
+    };
+
+    join.addEventListener("click", () => {
+      setStep("detect", true);
+      setStep("consent", true);
+      if (state) state.textContent = "Meeting found · waiting for consent";
+      join.disabled = true;
+      allow.disabled = false;
+    });
+
+    allow.addEventListener("click", () => {
+      setStep("capture", true);
+      signal?.classList.add("is-live");
+      if (state) state.textContent = "Recording · audio remains local";
+      allow.disabled = true;
+      stop.disabled = false;
+    });
+
+    stop.addEventListener("click", () => {
+      setStep("notes", true);
+      signal?.classList.remove("is-live");
+      if (state) state.textContent = "Complete · notes saved locally";
+      if (note) note.hidden = false;
+      stop.disabled = true;
+    });
+
+    reset.addEventListener("click", resetAll);
+  });
+</script>
+
+<style>
+  .meeting-lab {
+    border: 1px solid var(--rule);
+    border-radius: var(--radius);
+    background: var(--paper-2);
+    padding: clamp(1rem, 3vw, 1.6rem);
+    margin-top: 2rem;
+  }
+
+  .lab-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: start;
+    gap: 1rem;
+  }
+
+  .lab-head .mono { margin-bottom: 0.45rem; }
+  .state { color: var(--accent); text-align: right; }
+
+  .signal {
+    height: 72px;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    margin: 1.3rem 0;
+    padding: 0 0.8rem;
+    border-block: 1px solid var(--rule);
+    overflow: hidden;
+  }
+
+  .signal i {
+    flex: 1;
+    min-width: 2px;
+    height: 4px;
+    background: var(--rule-2);
+    border-radius: 99px;
+  }
+
+  .signal.is-live i {
+    background: var(--accent);
+    animation: audio 0.7s ease-in-out infinite alternate;
+    animation-delay: calc(var(--i) * -41ms);
+  }
+
+  @keyframes audio {
+    from { height: 5px; opacity: 0.45; }
+    to { height: 44px; opacity: 1; }
+  }
+
+  .flow {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 0.55rem;
+  }
+
+  .flow li {
+    position: relative;
+    min-height: 7.5rem;
+    padding: 0.8rem;
+    border: 1px solid var(--rule);
+    color: var(--ink-3);
+    transition: background 0.25s ease, border-color 0.25s ease, color 0.25s ease;
+  }
+
+  .flow li.is-on {
+    color: var(--ink);
+    border-color: var(--accent);
+    background: var(--accent-wash);
+  }
+
+  .flow span, .flow strong, .flow small { display: block; }
+  .flow span { margin-bottom: 0.65rem; font-size: 0.6rem; }
+  .flow strong { font-size: 0.9rem; font-weight: 580; }
+  .flow small { margin-top: 0.4rem; font-size: 0.72rem; line-height: 1.45; }
+
+  .boundary {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 1rem;
+    margin: 1rem 0;
+    padding: 1rem;
+    background: var(--paper);
+  }
+
+  .boundary > div { display: flex; gap: 0.65rem; align-items: flex-start; }
+  .boundary p { margin: 0; font-size: 0.78rem; line-height: 1.5; color: var(--ink-2); }
+  .boundary strong { color: var(--ink); }
+  .boundary-dot { width: 9px; height: 9px; margin-top: 0.3rem; border-radius: 50%; flex: none; }
+  .boundary-dot.local { background: var(--accent); }
+  .boundary-dot.sent { border: 2px solid var(--flag); }
+
+  .controls { display: flex; flex-wrap: wrap; gap: 0.55rem; align-items: center; }
+  .controls .btn { font-size: 0.78rem; padding: 0.58rem 0.8rem; cursor: pointer; }
+  .controls button:disabled { opacity: 0.38; cursor: not-allowed; }
+  .reset { border: 0; background: transparent; cursor: pointer; padding: 0.5rem; }
+
+  .note-preview {
+    margin-top: 1rem;
+    padding: 1rem;
+    border-left: 3px solid var(--accent);
+    background: var(--accent-wash);
+  }
+
+  .note-preview > .mono { margin-bottom: 0.5rem; }
+  .note-preview h4 { margin-bottom: 0.8rem; }
+  .note-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
+  .note-cols p { margin: 0; font-size: 0.84rem; color: var(--ink-2); }
+
+  @media (max-width: 720px) {
+    .lab-head { display: grid; }
+    .state { text-align: left; }
+    .flow { grid-template-columns: 1fr 1fr; }
+    .boundary, .note-cols { grid-template-columns: 1fr; }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .signal.is-live i { animation: none; height: 24px; }
+  }
+</style>

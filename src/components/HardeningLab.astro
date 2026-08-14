@@ -1,0 +1,136 @@
+---
+/** A stateful, synthetic hardening run: audit → backup → apply → verify → rollback. */
+const checks = [
+  ["Account policy", "Minimum password length", "8 chars", "14 chars"],
+  ["Firewall", "Public profile", "disabled", "enabled"],
+  ["Audit policy", "Logon failures", "none", "success + failure"],
+  ["Remote access", "Guest account", "enabled", "disabled"],
+  ["Defender", "Real-time protection", "disabled", "enabled"],
+];
+---
+
+<figure class="lab" data-hardening-lab>
+  <header class="lab-head">
+    <div>
+      <p class="mono">Live model · evidence before action</p>
+      <h3 class="h-sm">A hardening run, with a way back</h3>
+    </div>
+    <label class="target mono">Baseline
+      <select data-baseline aria-label="Select target baseline">
+        <option value="workstation">Windows workstation</option>
+        <option value="server">Windows Server 2022</option>
+      </select>
+    </label>
+  </header>
+
+  <div class="lab-grid">
+    <div class="machine">
+      <div class="machine-head">
+        <span class="mono">Machine state</span>
+        <strong data-score>0 / 5 checked</strong>
+      </div>
+      <div class="checks">
+        {checks.map(([area, setting, current, expected], i) => (
+          <div class="check" data-check style={`--delay:${i * 85}ms`}>
+            <span class="status" aria-hidden="true"></span>
+            <span><span class="check-area mono">{area}</span><strong>{setting}</strong></span>
+            <span class="values"><span data-current>{current}</span><span class="arrow-mini">→</span><span data-expected>{expected}</span></span>
+          </div>
+        ))}
+      </div>
+    </div>
+
+    <div class="run-log" aria-live="polite">
+      <p class="mono log-title">Run evidence</p>
+      <ol data-log>
+        <li><time>00:00</time><span>Ready. No system changes requested.</span></li>
+      </ol>
+      <p class="artifact mono" data-artifact>No backup created · no changes made</p>
+    </div>
+  </div>
+
+  <div class="lab-actions">
+    <button class="chip is-primary" type="button" data-simulate>01 · Simulate</button>
+    <button class="chip" type="button" data-apply disabled>02 · Back up + apply</button>
+    <button class="chip" type="button" data-rollback disabled>03 · Roll back</button>
+  </div>
+
+  <figcaption>
+    This is a synthetic machine state, not a list of production checks. Run the
+    read-only audit first. Applying captures the original values before changing
+    them; rollback uses that captured state rather than a generic “default.”
+  </figcaption>
+</figure>
+
+<script>
+  const host = document.querySelector<HTMLElement>("[data-hardening-lab]");
+  if (host) {
+    const checks = [...host.querySelectorAll<HTMLElement>("[data-check]")];
+    const score = host.querySelector<HTMLElement>("[data-score]")!;
+    const log = host.querySelector<HTMLOListElement>("[data-log]")!;
+    const artifact = host.querySelector<HTMLElement>("[data-artifact]")!;
+    const simulate = host.querySelector<HTMLButtonElement>("[data-simulate]")!;
+    const apply = host.querySelector<HTMLButtonElement>("[data-apply]")!;
+    const rollback = host.querySelector<HTMLButtonElement>("[data-rollback]")!;
+    const baseline = host.querySelector<HTMLSelectElement>("[data-baseline]")!;
+    let state: "idle" | "audited" | "applied" = "idle";
+
+    const stamp = (n: number) => `00:${String(n).padStart(2, "0")}`;
+    function writeLog(lines: string[]) {
+      log.innerHTML = lines.map((line, i) => `<li><time>${stamp(i)}</time><span>${line}</span></li>`).join("");
+    }
+    function audit() {
+      state = "audited";
+      host.className = "lab is-audited";
+      score.textContent = "0 / 5 compliant";
+      writeLog(["Baseline loaded; audit mode is read-only.", "5 controls inspected; 5 findings recorded.", "Exit code 2: drift found, machine unchanged."]);
+      artifact.textContent = "findings.csv written · 0 settings changed";
+      apply.disabled = false; rollback.disabled = true;
+    }
+    function remediate() {
+      if (state !== "audited") return;
+      state = "applied";
+      host.className = "lab is-audited is-applied";
+      score.textContent = "5 / 5 compliant";
+      writeLog(["Pre-change state captured in rollback manifest.", "5 remediations applied against declared policy.", "Verification pass: 5 of 5 controls compliant."]);
+      artifact.textContent = "backup.json + revert.ps1 written · 5 settings changed";
+      apply.disabled = true; rollback.disabled = false;
+    }
+    function revert() {
+      state = "audited";
+      host.className = "lab is-audited is-rolled-back";
+      score.textContent = "0 / 5 compliant · restored";
+      writeLog(["Rollback manifest loaded.", "5 original values restored—not baseline defaults.", "Verification pass matches pre-run fingerprint."]);
+      artifact.textContent = "rollback verified · original state restored";
+      apply.disabled = false; rollback.disabled = true;
+    }
+    simulate.addEventListener("click", audit);
+    apply.addEventListener("click", remediate);
+    rollback.addEventListener("click", revert);
+    baseline.addEventListener("change", () => {
+      host.className = "lab"; state = "idle"; score.textContent = "0 / 5 checked";
+      writeLog([`${baseline.selectedOptions[0].text} baseline selected. No system changes requested.`]);
+      artifact.textContent = "No backup created · no changes made"; apply.disabled = true; rollback.disabled = true;
+    });
+  }
+</script>
+
+<style>
+  .lab{border:1px solid var(--rule);background:var(--paper-2);margin:2.25rem 0;border-radius:var(--radius)}
+  .lab-head{padding:1rem 1.1rem;display:flex;justify-content:space-between;align-items:end;gap:1rem;border-bottom:1px solid var(--rule)}
+  .lab-head .mono{margin:0 0 .25rem}.target{display:grid;gap:.3rem}.target select{font:inherit;font-size:.75rem;color:var(--ink);background:var(--paper);border:1px solid var(--rule);padding:.35rem}
+  .lab-grid{display:grid;grid-template-columns:1.35fr .85fr}.machine{border-right:1px solid var(--rule)}
+  .machine-head{display:flex;justify-content:space-between;padding:.8rem 1rem;border-bottom:1px solid var(--rule);font-size:.8rem}.machine-head strong{color:var(--accent)}
+  .check{display:grid;grid-template-columns:10px minmax(8rem,1fr) auto;gap:.65rem;align-items:center;padding:.65rem 1rem;border-bottom:1px solid var(--rule);font-size:.78rem}
+  .check:last-child{border-bottom:0}.status{width:8px;height:8px;border:1px solid var(--rule-2);border-radius:50%}.check-area{display:block;font-size:.5rem;margin-bottom:.05rem}.check strong{font-weight:540}
+  .values{display:grid;grid-template-columns:1fr 15px 1fr;align-items:center;text-align:right;color:var(--ink-3);font-family:var(--mono);font-size:.57rem}.values [data-expected]{color:var(--ink-2)}.arrow-mini{text-align:center}
+  .run-log{padding:.9rem 1rem;min-height:15rem}.log-title{margin:0 0 .7rem}.run-log ol{list-style:none;margin:0;padding:0;display:grid;gap:.55rem;font-size:.72rem}.run-log li{display:grid;grid-template-columns:2.5rem 1fr;gap:.5rem}.run-log time{font-family:var(--mono);color:var(--ink-3)}.artifact{border-top:1px solid var(--rule);padding-top:.7rem;margin-top:1rem;font-size:.52rem;color:var(--accent)}
+  .lab-actions{display:flex;flex-wrap:wrap;gap:.5rem;padding:.85rem 1rem;border-top:1px solid var(--rule)}.chip{font:inherit;font-size:.7rem;padding:.42rem .7rem;border:1px solid var(--rule-2);background:transparent;color:var(--ink);cursor:pointer}.chip:disabled{opacity:.35;cursor:not-allowed}.chip.is-primary{border-color:var(--accent);color:var(--accent)}
+  .lab figcaption{padding:.85rem 1rem;border-top:1px solid var(--rule);font-size:.8rem;color:var(--ink-3)}
+  .is-audited .status{border-color:var(--flag);background:var(--flag);animation:pop .3s both;animation-delay:var(--delay)}.is-audited .check{background:color-mix(in srgb,var(--flag) 3%,transparent)}
+  .is-applied .status{border-color:var(--accent);background:var(--accent)}.is-applied .check{background:var(--accent-wash)}.is-applied [data-current]{text-decoration:line-through;color:var(--ink-3)}.is-applied [data-expected]{color:var(--accent)}
+  .is-rolled-back .status{background:transparent;border-color:var(--ink-3)}
+  @keyframes pop{from{transform:scale(0)}}
+  @media(max-width:720px){.lab-head{align-items:start;flex-direction:column}.lab-grid{grid-template-columns:1fr}.machine{border-right:0;border-bottom:1px solid var(--rule)}.check{grid-template-columns:10px 1fr}.values{grid-column:2;text-align:left}.run-log{min-height:0}}
+  @media(prefers-reduced-motion:reduce){.is-audited .status{animation:none}}
+</style>

@@ -1,0 +1,533 @@
+---
+/**
+ * Interactive illustration of the FRCMOB vision pipeline.
+ *
+ * Left panel  — the camera view: what a scout in the stands sees. Robots are
+ *               drawn under a perspective transform, with detection boxes and
+ *               track IDs over them.
+ * Right panel — the same robots after the homography maps pixel space onto
+ *               field coordinates, plus an accumulated dwell heat map.
+ *
+ * The motion is synthetic. It demonstrates the transform, it is not replayed
+ * match data — the caption says so on the page.
+ */
+---
+
+<figure class="tracker" data-tracker>
+  <div class="tracker-head">
+    <p class="mono">Fig. 01 · Camera space to field space</p>
+    <div class="tracker-controls">
+      <button type="button" data-layer="boxes" class="chip is-on" aria-pressed="true">Detections</button>
+      <button type="button" data-layer="ids" class="chip is-on" aria-pressed="true">Track IDs</button>
+      <button type="button" data-layer="heat" class="chip" aria-pressed="false">Heat map</button>
+      <button type="button" data-play class="chip chip-play" aria-pressed="true">Pause</button>
+    </div>
+  </div>
+
+  <div class="tracker-panes">
+    <div class="pane">
+      <canvas data-camera width="640" height="380" role="img"
+        aria-label="Simulated camera view of a robotics field with detection boxes drawn around six moving robots."></canvas>
+      <p class="pane-label mono">01 · Camera view · YOLO detections, ByteTrack IDs</p>
+    </div>
+    <div class="pane">
+      <canvas data-field width="640" height="380" role="img"
+        aria-label="The same six robots plotted in field coordinates after the homography transform, with an optional dwell-time heat map."></canvas>
+      <p class="pane-label mono">02 · Field coordinates · homography applied</p>
+    </div>
+  </div>
+
+  <figcaption>
+    A demonstration of the transform the tracker performs, drawn with synthetic
+    motion rather than replayed match footage. In the real pipeline the four
+    field corners come from AprilTag detection or a scout's taps, and the same
+    3×3 matrix converts every detection into field coordinates.
+  </figcaption>
+</figure>
+
+<script>
+  type Pt = { x: number; y: number };
+
+  const HOST = document.querySelector<HTMLElement>("[data-tracker]");
+  if (HOST) {
+    const cam = HOST.querySelector<HTMLCanvasElement>("[data-camera]")!;
+    const fld = HOST.querySelector<HTMLCanvasElement>("[data-field]")!;
+    const cx = cam.getContext("2d")!;
+    const fx = fld.getContext("2d")!;
+
+    const W = 640;
+    const H = 380;
+    // Field is drawn in a normalized 0..1 space, then scaled into the pane.
+    const PAD = 34;
+
+    const layers = { boxes: true, ids: true, heat: false };
+    let playing = true;
+
+    const reduce = window.matchMedia("(prefers-reduced-motion: reduce)");
+
+    /* ---- Perspective transform ------------------------------------
+       Maps the unit square (field space) onto four quad corners
+       (camera space). This is the same idea as the homography the
+       backend solves for with RANSAC over AprilTag correspondences —
+       here the corners are fixed, so the matrix is written directly. */
+    const QUAD: [Pt, Pt, Pt, Pt] = [
+      { x: 96, y: 96 },   // far left
+      { x: 544, y: 96 },  // far right
+      { x: 620, y: 322 }, // near right
+      { x: 20, y: 322 },  // near left
+    ];
+
+    function project(u: number, v: number): Pt {
+      // Bilinear interpolation across the quad. With a trapezoid this
+      // reproduces the foreshortening a real camera sees.
+      const top = {
+        x: QUAD[0].x + (QUAD[1].x - QUAD[0].x) * u,
+        y: QUAD[0].y + (QUAD[1].y - QUAD[0].y) * u,
+      };
+      const bot = {
+        x: QUAD[3].x + (QUAD[2].x - QUAD[3].x) * u,
+        y: QUAD[3].y + (QUAD[2].y - QUAD[3].y) * u,
+      };
+      return { x: top.x + (bot.x - top.x) * v, y: top.y + (bot.y - top.y) * v };
+    }
+
+    /* ---- Robots ---------------------------------------------------
+       Six tracks, three per alliance, each following a looping path so
+       the demo is deterministic and never drifts off the field. */
+    type Robot = {
+      id: number;
+      team: string;
+      alliance: "red" | "blue";
+      phase: number;
+      speed: number;
+      /** Path shape parameters. */
+      ax: number; ay: number; bx: number; by: number; cx: number; cy: number;
+    };
+
+    const ROBOTS: Robot[] = [
+      { id: 1, team: "5417", alliance: "blue", phase: 0.0, speed: 0.19, ax: 0.28, ay: 0.22, bx: 0.20, by: 0.16, cx: 1, cy: 2 },
+      { id: 2, team: "4499", alliance: "blue", phase: 1.9, speed: 0.15, ax: 0.34, ay: 0.62, bx: 0.16, by: 0.20, cx: 2, cy: 1 },
+      { id: 3, team: "6800", alliance: "blue", phase: 3.4, speed: 0.23, ax: 0.24, ay: 0.44, bx: 0.13, by: 0.26, cx: 3, cy: 2 },
+      { id: 4, team: "2468", alliance: "red", phase: 0.9, speed: 0.17, ax: 0.72, ay: 0.30, bx: 0.18, by: 0.19, cx: 2, cy: 3 },
+      { id: 5, team: "1234", alliance: "red", phase: 2.6, speed: 0.21, ax: 0.68, ay: 0.66, bx: 0.21, by: 0.17, cx: 1, cy: 2 },
+      { id: 6, team: "3005", alliance: "red", phase: 4.4, speed: 0.13, ax: 0.78, ay: 0.48, bx: 0.12, by: 0.28, cx: 3, cy: 1 },
+    ];
+
+    function posAt(r: Robot, t: number): Pt {
+      const s = t * r.speed + r.phase;
+      return {
+        x: Math.min(0.94, Math.max(0.06, r.ax + r.bx * Math.sin(s * r.cx))),
+        y: Math.min(0.94, Math.max(0.06, r.ay + r.by * Math.cos(s * r.cy))),
+      };
+    }
+
+    /* ---- Heat map accumulator ------------------------------------- */
+    const GRID = 26;
+    const heat = new Float32Array(GRID * GRID);
+
+    function addHeat(p: Pt) {
+      const gx = Math.min(GRID - 1, Math.max(0, Math.floor(p.x * GRID)));
+      const gy = Math.min(GRID - 1, Math.max(0, Math.floor(p.y * GRID)));
+      heat[gy * GRID + gx] += 1;
+    }
+
+    function css(name: string) {
+      return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+    }
+
+    const RED = "#c2410c";
+    const BLUE = "#1a46d8";
+
+    function colorFor(r: Robot) {
+      return r.alliance === "red" ? RED : BLUE;
+    }
+
+    /* ---- Drawing -------------------------------------------------- */
+
+    function drawCamera(t: number) {
+      const ink = css("--ink");
+      const rule = css("--rule-2");
+      const dim = css("--ink-3");
+
+      cx.clearRect(0, 0, W, H);
+
+      // Field outline in camera space.
+      cx.strokeStyle = rule;
+      cx.lineWidth = 1.25;
+      cx.beginPath();
+      cx.moveTo(QUAD[0].x, QUAD[0].y);
+      QUAD.slice(1).forEach((q) => cx.lineTo(q.x, q.y));
+      cx.closePath();
+      cx.stroke();
+
+      // Perspective grid lines.
+      cx.strokeStyle = rule;
+      cx.globalAlpha = 0.32;
+      cx.lineWidth = 1;
+      for (let i = 1; i < 6; i++) {
+        const u = i / 6;
+        const a = project(u, 0);
+        const b = project(u, 1);
+        cx.beginPath();
+        cx.moveTo(a.x, a.y);
+        cx.lineTo(b.x, b.y);
+        cx.stroke();
+      }
+      for (let i = 1; i < 4; i++) {
+        const v = i / 4;
+        const a = project(0, v);
+        const b = project(1, v);
+        cx.beginPath();
+        cx.moveTo(a.x, a.y);
+        cx.lineTo(b.x, b.y);
+        cx.stroke();
+      }
+      cx.globalAlpha = 1;
+
+      // Corner fiducials — where the calibration points come from.
+      QUAD.forEach((q, i) => {
+        cx.fillStyle = ink;
+        cx.fillRect(q.x - 4, q.y - 4, 8, 8);
+        cx.fillStyle = dim;
+        cx.font = '9px ui-monospace, monospace';
+        cx.fillText(`c${i}`, q.x + 7, q.y - 6);
+      });
+
+      // Robots, far to near so nearer ones overlap correctly.
+      const order = [...ROBOTS].sort((a, b) => posAt(a, t).y - posAt(b, t).y);
+
+      order.forEach((r) => {
+        const f = posAt(r, t);
+        const p = project(f.x, f.y);
+        // Scale with depth so it reads as perspective.
+        const scale = 0.55 + f.y * 0.75;
+        const w = 34 * scale;
+        const h = 26 * scale;
+
+        // Robot body.
+        cx.fillStyle = colorFor(r);
+        cx.globalAlpha = 0.9;
+        cx.fillRect(p.x - w / 2, p.y - h, w, h);
+        cx.globalAlpha = 1;
+
+        if (layers.boxes) {
+          // Detection box, drawn a little looser than the body.
+          const bw = w + 10 * scale;
+          const bh = h + 12 * scale;
+          const bx = p.x - bw / 2;
+          const by = p.y - h - 7 * scale;
+
+          cx.strokeStyle = colorFor(r);
+          cx.lineWidth = 1.4;
+          cx.setLineDash([4, 3]);
+          cx.strokeRect(bx, by, bw, bh);
+          cx.setLineDash([]);
+
+          // Corner ticks.
+          cx.lineWidth = 2;
+          const k = 6 * scale;
+          [[bx, by, 1, 1], [bx + bw, by, -1, 1], [bx, by + bh, 1, -1], [bx + bw, by + bh, -1, -1]]
+            .forEach(([X, Y, sx, sy]) => {
+              cx.beginPath();
+              cx.moveTo(X + k * sx, Y);
+              cx.lineTo(X, Y);
+              cx.lineTo(X, Y + k * sy);
+              cx.stroke();
+            });
+
+          if (layers.ids) {
+            const label = `id:${r.id} · ${r.team}`;
+            cx.font = '10px ui-monospace, monospace';
+            const tw = cx.measureText(label).width + 8;
+            cx.fillStyle = colorFor(r);
+            cx.fillRect(bx, by - 14, tw, 13);
+            cx.fillStyle = "#fff";
+            cx.fillText(label, bx + 4, by - 4);
+          }
+        }
+      });
+    }
+
+    function drawField(t: number) {
+      const rule = css("--rule-2");
+      const dim = css("--ink-3");
+      const ink = css("--ink");
+
+      fx.clearRect(0, 0, W, H);
+
+      const fw = W - PAD * 2;
+      const fh = H - PAD * 2;
+      const toPane = (p: Pt): Pt => ({ x: PAD + p.x * fw, y: PAD + p.y * fh });
+
+      // Heat map underneath everything else.
+      if (layers.heat) {
+        let max = 0;
+        for (let i = 0; i < heat.length; i++) max = Math.max(max, heat[i]);
+        if (max > 0) {
+          const cw = fw / GRID;
+          const ch = fh / GRID;
+          for (let gy = 0; gy < GRID; gy++) {
+            for (let gx = 0; gx < GRID; gx++) {
+              const v = heat[gy * GRID + gx] / max;
+              if (v <= 0.01) continue;
+              // Single-hue ramp; intensity carries the value.
+              fx.fillStyle = `rgba(194, 65, 12, ${Math.min(0.72, v * 0.85)})`;
+              fx.fillRect(PAD + gx * cw, PAD + gy * ch, cw + 0.5, ch + 0.5);
+            }
+          }
+        }
+      }
+
+      // Field boundary and zone lines.
+      fx.strokeStyle = rule;
+      fx.lineWidth = 1.25;
+      fx.strokeRect(PAD, PAD, fw, fh);
+
+      fx.globalAlpha = 0.35;
+      fx.lineWidth = 1;
+      for (let i = 1; i < 6; i++) {
+        const x = PAD + (fw * i) / 6;
+        fx.beginPath();
+        fx.moveTo(x, PAD);
+        fx.lineTo(x, PAD + fh);
+        fx.stroke();
+      }
+      for (let i = 1; i < 4; i++) {
+        const y = PAD + (fh * i) / 4;
+        fx.beginPath();
+        fx.moveTo(PAD, y);
+        fx.lineTo(PAD + fw, y);
+        fx.stroke();
+      }
+      fx.globalAlpha = 1;
+
+      // Centre line.
+      fx.strokeStyle = rule;
+      fx.setLineDash([5, 4]);
+      fx.beginPath();
+      fx.moveTo(PAD + fw / 2, PAD);
+      fx.lineTo(PAD + fw / 2, PAD + fh);
+      fx.stroke();
+      fx.setLineDash([]);
+
+      // Axis ticks — the coordinate-style detail.
+      fx.fillStyle = dim;
+      fx.font = '9px ui-monospace, monospace';
+      fx.fillText("0", PAD - 4, PAD + fh + 15);
+      fx.fillText("x", PAD + fw / 2, PAD + fh + 15);
+      fx.fillText("54 ft", PAD + fw - 22, PAD + fh + 15);
+      fx.save();
+      fx.translate(PAD - 12, PAD + fh / 2);
+      fx.rotate(-Math.PI / 2);
+      fx.fillText("y", 0, 0);
+      fx.restore();
+
+      // Trajectory tails, then the robot markers.
+      ROBOTS.forEach((r) => {
+        const col = colorFor(r);
+
+        fx.strokeStyle = col;
+        fx.globalAlpha = 0.32;
+        fx.lineWidth = 1.4;
+        fx.beginPath();
+        for (let k = 60; k >= 0; k--) {
+          const p = toPane(posAt(r, t - k * 0.05));
+          k === 60 ? fx.moveTo(p.x, p.y) : fx.lineTo(p.x, p.y);
+        }
+        fx.stroke();
+        fx.globalAlpha = 1;
+
+        const p = toPane(posAt(r, t));
+        fx.fillStyle = col;
+        fx.beginPath();
+        fx.arc(p.x, p.y, 5, 0, Math.PI * 2);
+        fx.fill();
+
+        fx.strokeStyle = col;
+        fx.globalAlpha = 0.5;
+        fx.lineWidth = 1;
+        fx.beginPath();
+        fx.arc(p.x, p.y, 9.5, 0, Math.PI * 2);
+        fx.stroke();
+        fx.globalAlpha = 1;
+
+        if (layers.ids) {
+          fx.fillStyle = ink;
+          fx.font = '10px ui-monospace, monospace';
+          fx.fillText(r.team, p.x + 12, p.y + 3.5);
+        }
+      });
+    }
+
+    /* ---- Loop ----------------------------------------------------- */
+    let t = 0;
+    let raf = 0;
+    let last = performance.now();
+
+    function frame(now: number) {
+      const dt = Math.min(0.05, (now - last) / 1000);
+      last = now;
+
+      if (playing) {
+        t += dt;
+        ROBOTS.forEach((r) => addHeat(posAt(r, t)));
+      }
+
+      drawCamera(t);
+      drawField(t);
+      raf = requestAnimationFrame(frame);
+    }
+
+    // Only animate while the figure is on screen.
+    const vis = new IntersectionObserver((entries) => {
+      entries.forEach((e) => {
+        if (e.isIntersecting) {
+          if (!raf) {
+            last = performance.now();
+            raf = requestAnimationFrame(frame);
+          }
+        } else if (raf) {
+          cancelAnimationFrame(raf);
+          raf = 0;
+        }
+      });
+    }, { threshold: 0.05 });
+
+    vis.observe(HOST);
+
+    if (reduce.matches) {
+      // Show a settled frame with the heat map already built, no motion.
+      playing = false;
+      for (let i = 0; i < 900; i++) {
+        ROBOTS.forEach((r) => addHeat(posAt(r, i * 0.05)));
+      }
+      t = 12;
+    }
+
+    /* ---- Controls -------------------------------------------------- */
+    HOST.querySelectorAll<HTMLButtonElement>("[data-layer]").forEach((btn) => {
+      const key = btn.dataset.layer as keyof typeof layers;
+      btn.setAttribute("aria-pressed", String(layers[key]));
+      btn.classList.toggle("is-on", layers[key]);
+
+      btn.addEventListener("click", () => {
+        layers[key] = !layers[key];
+        btn.setAttribute("aria-pressed", String(layers[key]));
+        btn.classList.toggle("is-on", layers[key]);
+        drawCamera(t);
+        drawField(t);
+      });
+    });
+
+    const playBtn = HOST.querySelector<HTMLButtonElement>("[data-play]");
+    const syncPlay = () => {
+      if (!playBtn) return;
+      playBtn.textContent = playing ? "Pause" : "Play";
+      playBtn.setAttribute("aria-pressed", String(playing));
+      playBtn.classList.toggle("is-on", playing);
+    };
+
+    playBtn?.addEventListener("click", () => {
+      playing = !playing;
+      syncPlay();
+    });
+
+    syncPlay();
+  }
+</script>
+
+<style>
+  .tracker {
+    margin: 2.75rem 0;
+    border: 1px solid var(--rule);
+    border-radius: var(--radius);
+    background: var(--paper-2);
+    overflow: hidden;
+  }
+
+  .tracker-head {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+    padding: 0.8rem 1rem;
+    border-bottom: 1px solid var(--rule);
+  }
+
+  .tracker-controls {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.35rem;
+  }
+
+  .chip {
+    font-family: var(--mono);
+    font-size: 0.66rem;
+    letter-spacing: 0.07em;
+    text-transform: uppercase;
+    padding: 0.3rem 0.6rem;
+    border: 1px solid var(--rule);
+    background: transparent;
+    color: var(--ink-3);
+    border-radius: 2px;
+    cursor: pointer;
+    transition: color 0.15s ease, border-color 0.15s ease, background 0.15s ease;
+  }
+
+  .chip:hover {
+    color: var(--ink);
+    border-color: var(--rule-2);
+  }
+
+  .chip.is-on {
+    color: var(--accent);
+    border-color: var(--accent);
+    background: var(--accent-wash);
+  }
+
+  .tracker-panes {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .pane {
+    padding: 0.9rem;
+    min-width: 0;
+  }
+
+  .pane + .pane {
+    border-left: 1px solid var(--rule);
+  }
+
+  .pane canvas {
+    width: 100%;
+    height: auto;
+    aspect-ratio: 640 / 380;
+  }
+
+  .pane-label {
+    margin: 0.5rem 0 0;
+    font-size: 0.63rem;
+  }
+
+  .tracker figcaption {
+    padding: 0.9rem 1rem 1.05rem;
+    border-top: 1px solid var(--rule);
+    font-size: 0.86rem;
+    color: var(--ink-3);
+    line-height: 1.55;
+    max-width: 62ch;
+  }
+
+  @media (max-width: 760px) {
+    .tracker-panes {
+      grid-template-columns: 1fr;
+    }
+
+    .pane + .pane {
+      border-left: 0;
+      border-top: 1px solid var(--rule);
+    }
+  }
+</style>

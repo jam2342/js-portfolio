@@ -1,0 +1,373 @@
+---
+/**
+ * Euler–Maruyama simulation of the three SDE families in the paper, plus the
+ * nonlinear model. Paths are generated in the browser from a seeded PRNG so
+ * the figure is reproducible and the "resample" control means something.
+ *
+ * This is a live numerical demonstration, not a stored image.
+ */
+---
+
+<figure class="sde" data-sde>
+  <div class="sde-head">
+    <p class="mono">Fig. 02 · Euler–Maruyama sample paths</p>
+    <div class="sde-controls">
+      <div class="seg" role="group" aria-label="Choose a model">
+        <button type="button" data-model="gbm" class="chip is-on" aria-pressed="true">Geometric Brownian</button>
+        <button type="button" data-model="ou" class="chip" aria-pressed="false">Ornstein–Uhlenbeck</button>
+        <button type="button" data-model="cir" class="chip" aria-pressed="false">Cox–Ingersoll–Ross</button>
+        <button type="button" data-model="nl" class="chip" aria-pressed="false">Stochastic logistic</button>
+      </div>
+      <button type="button" data-resample class="chip chip-alt">Resample</button>
+    </div>
+  </div>
+
+  <canvas data-canvas width="880" height="360" role="img"
+    aria-label="Simulated sample paths for the selected stochastic differential equation, with the mean path drawn over them."></canvas>
+
+  <div class="sde-readout">
+    <p class="sde-eq mono" data-eq></p>
+    <p class="sde-desc" data-desc></p>
+  </div>
+
+  <figcaption>
+    Twenty paths per model, integrated with the Euler–Maruyama scheme over 400
+    steps. The heavier line is the sample mean. Generated in the browser from a
+    seeded generator. <em>Resample</em> draws a new set of Brownian increments.
+  </figcaption>
+</figure>
+
+<script>
+  const HOST = document.querySelector<HTMLElement>("[data-sde]");
+
+  if (HOST) {
+    const canvas = HOST.querySelector<HTMLCanvasElement>("[data-canvas]")!;
+    const ctx = canvas.getContext("2d")!;
+    const eqEl = HOST.querySelector<HTMLElement>("[data-eq]")!;
+    const descEl = HOST.querySelector<HTMLElement>("[data-desc]")!;
+
+    const W = 880;
+    const H = 360;
+    const PAD = { l: 46, r: 16, t: 18, b: 30 };
+
+    const N = 400;   // steps
+    const PATHS = 20;
+    const T = 1;
+    const dt = T / N;
+
+    /* Seeded PRNG (mulberry32) so a given seed reproduces the same paths. */
+    function rng(seed: number) {
+      return function () {
+        seed |= 0;
+        seed = (seed + 0x6d2b79f5) | 0;
+        let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
+        t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+        return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+      };
+    }
+
+    /** Box–Muller, so the increments are actually Gaussian. */
+    function gauss(r: () => number) {
+      let u = 0;
+      let v = 0;
+      while (u === 0) u = r();
+      while (v === 0) v = r();
+      return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v);
+    }
+
+    type Model = {
+      key: string;
+      eq: string;
+      desc: string;
+      x0: number;
+      /** Drift a(x, t) and diffusion b(x, t). */
+      a: (x: number) => number;
+      b: (x: number) => number;
+      /** Keep the state in its natural domain, e.g. non-negative for CIR. */
+      clamp?: (x: number) => number;
+    };
+
+    const MODELS: Record<string, Model> = {
+      gbm: {
+        key: "gbm",
+        eq: "dS = μ S dt + σ S dW",
+        desc:
+          "Geometric Brownian motion, the process underlying Black–Scholes. Volatility scales with the level, so paths spread multiplicatively and never cross zero. Its multiplicative diffusion becomes additive under a logarithm, which is what makes it fully solvable. It's the reference point for everything else.",
+        x0: 1,
+        a: (x) => 0.08 * x,
+        b: (x) => 0.28 * x,
+      },
+      ou: {
+        key: "ou",
+        eq: "dX = θ(μ − X) dt + σ dW",
+        desc:
+          "Ornstein–Uhlenbeck. The drift pulls the state back toward a long-run mean at a rate set by θ, so paths wander but don't run away. Mean-reverting, Gaussian, and solvable in closed form.",
+        x0: 1.6,
+        a: (x) => 2.2 * (0.9 - x),
+        b: () => 0.22,
+      },
+      cir: {
+        key: "cir",
+        eq: "dX = θ(μ − X) dt + σ √X dW",
+        desc:
+          "Cox–Ingersoll–Ross. Mean-reverting like OU, but the diffusion carries a square root, so volatility falls as the state approaches zero and the process stays non-negative. That square root is what makes it harder to handle than OU.",
+        x0: 0.25,
+        a: (x) => 2.0 * (0.8 - x),
+        b: (x) => 0.5 * Math.sqrt(Math.max(x, 0)),
+        clamp: (x) => Math.max(x, 0),
+      },
+      nl: {
+        key: "nl",
+        eq: "dX = rX(1 − X/K) dt + σX dW",
+        desc:
+          "The stochastic logistic model: multiplicative diffusion like GBM, but with nonlinear quadratic drift that pulls the process toward a carrying capacity K. A reciprocal transformation gives an explicit pathwise solution, yet it depends on an exponential Brownian integral, so unlike the other three it has no comparably simple finite-time distribution.",
+        x0: 0.12,
+        a: (x) => 2.6 * x * (1 - x / 0.85),
+        b: (x) => 0.3 * x,
+        clamp: (x) => Math.max(x, 0),
+      },
+    };
+
+    let current = "gbm";
+    let seed = 20260813;
+
+    function simulate(m: Model, s: number) {
+      const r = rng(s);
+      const paths: number[][] = [];
+
+      for (let p = 0; p < PATHS; p++) {
+        const path = new Array<number>(N + 1);
+        let x = m.x0;
+        path[0] = x;
+
+        for (let i = 1; i <= N; i++) {
+          const dW = gauss(r) * Math.sqrt(dt);
+          x = x + m.a(x) * dt + m.b(x) * dW;
+          if (m.clamp) x = m.clamp(x);
+          path[i] = x;
+        }
+        paths.push(path);
+      }
+      return paths;
+    }
+
+    function css(name: string) {
+      return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+    }
+
+    function draw() {
+      const m = MODELS[current];
+      const paths = simulate(m, seed);
+
+      const accent = css("--accent");
+      const rule = css("--rule");
+      const rule2 = css("--rule-2");
+      const dim = css("--ink-3");
+      const ink = css("--ink");
+
+      // Bounds from the data, padded a little.
+      let lo = Infinity;
+      let hi = -Infinity;
+      paths.forEach((p) => p.forEach((v) => {
+        if (v < lo) lo = v;
+        if (v > hi) hi = v;
+      }));
+      const span = hi - lo || 1;
+      lo -= span * 0.08;
+      hi += span * 0.08;
+
+      const pw = W - PAD.l - PAD.r;
+      const ph = H - PAD.t - PAD.b;
+      const X = (i: number) => PAD.l + (i / N) * pw;
+      const Y = (v: number) => PAD.t + ph - ((v - lo) / (hi - lo)) * ph;
+
+      ctx.clearRect(0, 0, W, H);
+
+      // Axes and gridlines.
+      ctx.strokeStyle = rule;
+      ctx.lineWidth = 1;
+      ctx.font = '10px ui-monospace, monospace';
+      ctx.fillStyle = dim;
+
+      for (let i = 0; i <= 4; i++) {
+        const v = lo + ((hi - lo) * i) / 4;
+        const y = Y(v);
+        ctx.globalAlpha = 0.6;
+        ctx.beginPath();
+        ctx.moveTo(PAD.l, y);
+        ctx.lineTo(W - PAD.r, y);
+        ctx.stroke();
+        ctx.globalAlpha = 1;
+        ctx.fillText(v.toFixed(2), 6, y + 3.5);
+      }
+
+      ctx.strokeStyle = rule2;
+      ctx.beginPath();
+      ctx.moveTo(PAD.l, PAD.t);
+      ctx.lineTo(PAD.l, PAD.t + ph);
+      ctx.lineTo(W - PAD.r, PAD.t + ph);
+      ctx.stroke();
+
+      ctx.fillText("t = 0", PAD.l, H - 10);
+      ctx.fillText("t = 1", W - PAD.r - 26, H - 10);
+
+      // Sample paths.
+      ctx.strokeStyle = accent;
+      ctx.lineWidth = 1;
+      ctx.globalAlpha = 0.3;
+      paths.forEach((p) => {
+        ctx.beginPath();
+        p.forEach((v, i) => (i === 0 ? ctx.moveTo(X(i), Y(v)) : ctx.lineTo(X(i), Y(v))));
+        ctx.stroke();
+      });
+      ctx.globalAlpha = 1;
+
+      // Sample mean.
+      ctx.strokeStyle = ink;
+      ctx.lineWidth = 1.9;
+      ctx.beginPath();
+      for (let i = 0; i <= N; i++) {
+        let s = 0;
+        for (let p = 0; p < PATHS; p++) s += paths[p][i];
+        const v = s / PATHS;
+        i === 0 ? ctx.moveTo(X(i), Y(v)) : ctx.lineTo(X(i), Y(v));
+      }
+      ctx.stroke();
+
+      eqEl.textContent = m.eq;
+      descEl.textContent = m.desc;
+    }
+
+    HOST.querySelectorAll<HTMLButtonElement>("[data-model]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        current = btn.dataset.model!;
+        HOST.querySelectorAll<HTMLButtonElement>("[data-model]").forEach((b) => {
+          const on = b === btn;
+          b.classList.toggle("is-on", on);
+          b.setAttribute("aria-pressed", String(on));
+        });
+        draw();
+      });
+    });
+
+    HOST.querySelector("[data-resample]")?.addEventListener("click", () => {
+      seed = (seed * 1664525 + 1013904223) >>> 0;
+      draw();
+    });
+
+    draw();
+
+    // Redraw on theme change so the colors stay correct.
+    new MutationObserver(draw).observe(document.documentElement, {
+      attributes: true,
+      attributeFilter: ["data-theme"],
+    });
+  }
+</script>
+
+<style>
+  .sde {
+    margin: 2.5rem 0;
+    border: 1px solid var(--rule);
+    border-radius: var(--radius);
+    background: var(--paper-2);
+    overflow: hidden;
+  }
+
+  .sde-head {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+    padding: 0.8rem 1rem;
+    border-bottom: 1px solid var(--rule);
+  }
+
+  .sde-head > .mono {
+    margin: 0;
+  }
+
+  .sde-controls {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.5rem;
+  }
+
+  .seg {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.3rem;
+  }
+
+  .chip {
+    font-family: var(--mono);
+    font-size: 0.65rem;
+    letter-spacing: 0.06em;
+    padding: 0.3rem 0.55rem;
+    border: 1px solid var(--rule);
+    background: transparent;
+    color: var(--ink-3);
+    border-radius: 2px;
+    cursor: pointer;
+    transition: color 0.15s ease, border-color 0.15s ease, background 0.15s ease;
+  }
+
+  .chip:hover {
+    color: var(--ink);
+    border-color: var(--rule-2);
+  }
+
+  .chip.is-on {
+    color: var(--accent);
+    border-color: var(--accent);
+    background: var(--accent-wash);
+  }
+
+  .chip-alt {
+    border-style: dashed;
+  }
+
+  .sde canvas {
+    width: 100%;
+    height: auto;
+    aspect-ratio: 880 / 360;
+    padding: 0.75rem 0.6rem 0;
+  }
+
+  .sde-readout {
+    padding: 0.5rem 1rem 1rem;
+  }
+
+  .sde-eq {
+    margin: 0 0 0.6rem;
+    font-size: 0.82rem;
+    letter-spacing: 0.02em;
+    text-transform: none;
+    color: var(--accent);
+  }
+
+  .sde-desc {
+    margin: 0;
+    font-size: 0.92rem;
+    color: var(--ink-2);
+    max-width: 70ch;
+    min-height: 4.4em;
+  }
+
+  .sde figcaption {
+    padding: 0.9rem 1rem 1.05rem;
+    border-top: 1px solid var(--rule);
+    font-size: 0.85rem;
+    color: var(--ink-3);
+    line-height: 1.55;
+    max-width: 68ch;
+  }
+
+  @media (max-width: 600px) {
+    .sde-desc {
+      min-height: 0;
+    }
+  }
+</style>

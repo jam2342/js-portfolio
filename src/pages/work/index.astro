@@ -1,0 +1,132 @@
+---
+import Base from "../../layouts/Base.astro";
+import ProjectCard from "../../components/ProjectCard.astro";
+import { projects, allTags } from "../../data/projects";
+---
+
+<Base
+  title="Work, Jamal Mammadzada"
+  description="Projects by Jamal Mammadzada: a computer-vision scouting platform, a Windows hardening framework, educational robot kits, and a cryptography course."
+>
+  <section class="wrap page-head">
+    <p class="mono">Work</p>
+    <h1 class="h-lg">Projects</h1>
+    <p class="lede narrow">
+      Six systems, all still in use or active development. Each one has a case
+      study covering what the problem actually was, how it's built, and what
+      hasn't been solved yet.
+    </p>
+  </section>
+
+  <section class="wrap section" aria-labelledby="filter-head">
+    <div class="filters">
+      <p class="mono" id="filter-head">Filter</p>
+      <div class="filter-row" role="group" aria-label="Filter projects by area">
+        <button type="button" class="chip is-on" data-filter="all" aria-pressed="true">
+          All
+        </button>
+        {
+          allTags.map((t) => (
+            <button type="button" class="chip" data-filter={t} aria-pressed="false">
+              {t}
+            </button>
+          ))
+        }
+      </div>
+    </div>
+
+    <div class="cards" id="cards">
+      {projects.map((p, i) => <ProjectCard project={p} lead={i === 0} level={2} />)}
+    </div>
+
+    <p class="empty mono" id="empty" hidden>No projects match that filter.</p>
+  </section>
+</Base>
+
+<script>
+  const buttons = document.querySelectorAll<HTMLButtonElement>("[data-filter]");
+  const cards = document.querySelectorAll<HTMLElement>("#cards .card");
+  const empty = document.getElementById("empty");
+
+  buttons.forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const want = btn.dataset.filter!;
+
+      buttons.forEach((b) => {
+        const on = b === btn;
+        b.classList.toggle("is-on", on);
+        b.setAttribute("aria-pressed", String(on));
+      });
+
+      let shown = 0;
+      cards.forEach((card) => {
+        const tags = (card.dataset.tags ?? "").split("|");
+        const match = want === "all" || tags.includes(want);
+        card.hidden = !match;
+        if (match) shown++;
+      });
+
+      if (empty) empty.hidden = shown > 0;
+    });
+  });
+</script>
+
+<style>
+  .page-head {
+    padding-top: clamp(3rem, 7vw, 5rem);
+  }
+
+  .page-head .mono {
+    margin-bottom: 1.1rem;
+  }
+
+  .page-head h1 {
+    margin-bottom: 1.25rem;
+  }
+
+  .filters {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 1rem;
+    padding-bottom: 1.5rem;
+  }
+
+  .filter-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.35rem;
+  }
+
+  .chip {
+    font-family: var(--mono);
+    font-size: 0.68rem;
+    letter-spacing: 0.06em;
+    padding: 0.32rem 0.65rem;
+    border: 1px solid var(--rule);
+    background: transparent;
+    color: var(--ink-3);
+    border-radius: 2px;
+    cursor: pointer;
+    transition: color 0.15s ease, border-color 0.15s ease, background 0.15s ease;
+  }
+
+  .chip:hover {
+    color: var(--ink);
+    border-color: var(--rule-2);
+  }
+
+  .chip.is-on {
+    color: var(--accent);
+    border-color: var(--accent);
+    background: var(--accent-wash);
+  }
+
+  .cards {
+    border-bottom: 1px solid var(--rule);
+  }
+
+  .empty {
+    padding: 2rem 0;
+  }
+</style>

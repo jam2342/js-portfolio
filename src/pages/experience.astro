@@ -143,11 +143,13 @@ const others = competitions.filter((c) => !c.breakdown);
     <div class="resume-cta">
       <div>
         <h2 class="h-md">Full résumé</h2>
-        <p class="dim resume-note">PDF, one page.</p>
+        <p class="dim resume-note">Choose the standard one-page résumé or the visual edition.</p>
       </div>
       <div class="resume-actions">
-        <a href={site.resume} class="btn">Download PDF</a>
-        <a href={site.resumeDocx} class="btn btn-ghost">Word (.docx)</a>
+        <a href={site.resume} class="btn">Standard PDF</a>
+        <a href={site.resumeVisual} class="btn btn-ghost">Visual PDF</a>
+        <a href={site.resumeDocx} class="btn btn-ghost">Standard Word</a>
+        <a href={site.resumeVisualDocx} class="btn btn-ghost">Visual Word</a>
       </div>
     </div>
   </section>

@@ -1,0 +1,361 @@
+---
+import Base from "../layouts/Base.astro";
+import ProjectCard from "../components/ProjectCard.astro";
+import FieldTracker from "../components/FieldTracker.astro";
+import { site } from "../data/site";
+import CtfBreakdown from "../components/CtfBreakdown.astro";
+import EvidenceStrip from "../components/EvidenceStrip.astro";
+import { featuredProjects } from "../data/projects";
+import { competitions } from "../data/experience";
+
+const ctf = competitions.find((c) => c.breakdown)!;
+const others = competitions.filter((c) => !c.breakdown);
+---
+
+<Base title="Jamal Mammadzada, student researcher and engineer">
+  <section class="hero">
+    <div class="wrap hero-inner">
+      <p class="mono hero-kicker">
+        {site.school} · Class of {site.graduation.split(" ")[1]} · {site.location}
+      </p>
+
+      <h1 class="h-xl hero-title">
+        I build technical systems<br />that have to work<br />
+        <span class="hero-em">beyond the demo.</span>
+      </h1>
+
+      <div class="hero-body">
+        <p class="lede">
+          I'm a student researcher and engineer working on machine learning,
+          robotics, security, and technical education. Most of what I build ends
+          up in someone else's hands. A strategy team reading match analysis
+          between rounds. A competition image that has to survive being hardened
+          in under an hour. A ten-year-old assembling a robot for the first time.
+          That constraint shapes the engineering more than anything else does.
+        </p>
+
+        <div class="hero-actions">
+          <a href="/work/" class="btn">Selected work</a>
+          <a href={site.resume} class="btn btn-ghost">Résumé (PDF)</a>
+        </div>
+      </div>
+    </div>
+
+    <div class="hero-rule" aria-hidden="true"></div>
+  </section>
+
+  <section class="proof-band wrap" aria-label="Selected evidence">
+    <EvidenceStrip
+      label="Selected evidence"
+      items={[
+        { value: "6,540", label: "FRCMOB labeled frames", detail: "1,683 manually reviewed" },
+        { value: "~11,900", label: "PowerShell lines", detail: "Auditing, remediation, and rollback" },
+        { value: "70 / 70", label: "picoCTF challenges", detail: "Two-person team · #68 worldwide" },
+        { value: "Grades 3–8", label: "Eaglets audience", detail: "Free, build-and-program robotics camps" },
+      ]}
+    />
+  </section>
+
+  <section class="section wrap" aria-labelledby="focus">
+    <div class="rubric">
+      <p class="mono" id="focus">Areas</p>
+    </div>
+
+    <ul class="focus-grid" role="list">
+      <li class="reveal">
+        <p class="focus-n mono">01</p>
+        <h2 class="h-sm">Computer vision for robotics</h2>
+        <p>
+          Detection, multi-object tracking, and field-coordinate mapping applied
+          to competition match video, turning footage into positions, cycles, and
+          trajectories a person can check.
+        </p>
+      </li>
+      <li class="reveal">
+        <p class="focus-n mono">02</p>
+        <h2 class="h-sm">Security automation</h2>
+        <p>
+          Systems that audit machine state, apply policy against a baseline, and
+          record exactly what changed, with a way back if something breaks.
+        </p>
+      </li>
+      <li class="reveal">
+        <p class="focus-n mono">03</p>
+        <h2 class="h-sm">Embedded and educational hardware</h2>
+        <p>
+          Microcontroller robot kits and the beginner-facing libraries that make
+          them teachable to students in grades 3–8.
+        </p>
+      </li>
+      <li class="reveal">
+        <p class="focus-n mono">04</p>
+        <h2 class="h-sm">Mathematics and physics research</h2>
+        <p>
+          An extended essay on how far Itô calculus gets you when solving
+          stochastic differential equations, and a completed investigation into
+          temperature and capacitor discharge.
+        </p>
+      </li>
+    </ul>
+  </section>
+
+  <section class="section wrap" aria-labelledby="tracker-head">
+    <div class="rubric">
+      <p class="mono" id="tracker-head">The core problem, drawn</p>
+    </div>
+
+    <p class="narrow lede tracker-intro">
+      A camera in the stands sees a flat, foreshortened image. Strategy questions
+      are about the field: who held which zone, how long a cycle took, where a
+      robot actually spent the match. Getting from one to the other is a
+      calibration problem, and it's the piece everything else in FRCMOB depends on.
+    </p>
+
+    <FieldTracker />
+
+    <p class="narrow">
+      <a href="/work/frcmob/" class="arrow">How the full pipeline works</a>
+    </p>
+  </section>
+
+  <section class="section wrap" aria-labelledby="work-head">
+    <div class="rubric">
+      <p class="mono" id="work-head">Selected work</p>
+    </div>
+
+    <div class="cards">
+      {
+        featuredProjects.map((p, i) => (
+          <ProjectCard project={p} lead={i === 0} />
+        ))
+      }
+    </div>
+
+    <p class="cards-more">
+      <a href="/work/" class="arrow">All projects</a>
+    </p>
+  </section>
+
+  <section class="section wrap" aria-labelledby="comp-head">
+    <div class="rubric">
+      <p class="mono" id="comp-head">Competitions</p>
+    </div>
+
+    <div class="reveal ctf-wrap">
+      <CtfBreakdown comp={ctf} />
+    </div>
+
+    <ul class="comp-list" role="list">
+      {
+        others.map((c) => (
+          <li class="comp reveal">
+            <div class="comp-main">
+              <h2 class="h-sm">{c.name}</h2>
+              <p class="comp-detail">{c.detail}</p>
+            </div>
+            <div class="comp-side">
+              <p class="comp-result">{c.result}</p>
+              {c.year && <p class="mono">{c.year}</p>}
+            </div>
+          </li>
+        ))
+      }
+    </ul>
+  </section>
+
+  <section class="section wrap">
+    <div class="closing reveal">
+      <h2 class="h-lg">Open to research programs, internships, and collaboration.</h2>
+      <p class="lede closing-body">
+        If you're working on machine learning, robotics, security, or technical
+        education and think there's overlap, I'd like to hear about it.
+      </p>
+      <div class="hero-actions">
+        <a href={`mailto:${site.email}`} class="btn">{site.email}</a>
+        <a href="/contact/" class="btn btn-ghost">Contact</a>
+      </div>
+    </div>
+  </section>
+</Base>
+
+<style>
+  .hero {
+    padding-top: clamp(3.5rem, 9vw, 7rem);
+    position: relative;
+  }
+
+  .hero-kicker {
+    margin: 0 0 1.75rem;
+  }
+
+  .hero-title {
+    margin-bottom: 2.25rem;
+  }
+
+  .hero-em {
+    color: var(--accent);
+  }
+
+  .hero-body {
+    display: grid;
+    grid-template-columns: minmax(0, 62ch);
+    gap: 2rem;
+    /* Indent the body under the headline's optical column. */
+    margin-left: clamp(0rem, 6vw, 5rem);
+  }
+
+  .hero-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.7rem;
+  }
+
+  .hero-rule {
+    margin-top: var(--step);
+    height: 1px;
+    background: var(--rule);
+  }
+
+  .proof-band {
+    padding-top: clamp(2.2rem, 5vw, 3.8rem);
+  }
+
+  /* -- Areas -- */
+
+  .focus-grid {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+    gap: 2.5rem 2rem;
+  }
+
+  .focus-grid li {
+    border-top: 1px solid var(--rule);
+    padding-top: 1rem;
+  }
+
+  .focus-n {
+    margin: 0 0 0.85rem;
+    color: var(--accent);
+    font-size: 0.68rem;
+  }
+
+  .focus-grid h2 {
+    margin-bottom: 0.6rem;
+  }
+
+  .focus-grid p {
+    font-size: 0.94rem;
+    color: var(--ink-2);
+    margin: 0;
+  }
+
+  /* -- Tracker -- */
+
+  .tracker-intro {
+    margin-bottom: 0;
+  }
+
+  /* -- Cards -- */
+
+  .cards {
+    border-bottom: 1px solid var(--rule);
+  }
+
+  .cards-more {
+    margin-top: 1.75rem;
+  }
+
+  /* -- Competitions -- */
+
+  .ctf-wrap {
+    margin-bottom: 2.25rem;
+  }
+
+  .comp-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+  }
+
+  .comp {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    gap: 1.5rem;
+    align-items: start;
+    padding: 1.35rem 0;
+    border-top: 1px solid var(--rule);
+  }
+
+  .comp:last-child {
+    border-bottom: 1px solid var(--rule);
+  }
+
+  .comp-detail {
+    margin: 0.45rem 0 0;
+    color: var(--ink-2);
+    font-size: 0.94rem;
+    max-width: 58ch;
+  }
+
+  .comp-areas {
+    list-style: none;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.35rem;
+    margin: 0.85rem 0 0;
+    padding: 0;
+  }
+
+  .comp-side {
+    text-align: right;
+  }
+
+  .comp-result {
+    margin: 0;
+    font-weight: 560;
+    font-size: 0.95rem;
+    color: var(--accent);
+  }
+
+  .comp-side .mono {
+    margin: 0.25rem 0 0;
+    font-size: 0.66rem;
+  }
+
+  /* -- Closing -- */
+
+  .closing {
+    border-top: 1px solid var(--rule);
+    padding-top: 2.5rem;
+    max-width: 58ch;
+  }
+
+  .closing-body {
+    margin: 1.1rem 0 1.9rem;
+  }
+
+  @media (max-width: 640px) {
+    .hero-body {
+      margin-left: 0;
+    }
+
+    .comp {
+      grid-template-columns: 1fr;
+      gap: 0.75rem;
+    }
+
+    .comp-side {
+      text-align: left;
+      display: flex;
+      align-items: baseline;
+      gap: 0.7rem;
+    }
+
+    .comp-side .mono {
+      margin: 0;
+    }
+  }
+</style>

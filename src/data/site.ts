@@ -18,6 +18,8 @@ export const site = {
   coursework: ["IB Mathematics HL II", "AP Physics C: Electricity and Magnetism"],
   resume: "/Jamal_Mammadzada_Resume.pdf",
   resumeDocx: "/Jamal_Mammadzada_Resume.docx",
+  resumeVisual: "/Jamal_Mammadzada_Resume_Visual.pdf",
+  resumeVisualDocx: "/Jamal_Mammadzada_Resume_Visual.docx",
   description:
     "Jamal Mammadzada builds machine-learning, robotics, cybersecurity, and educational systems, from computer-vision match analysis to Windows hardening automation and robot kits for younger students.",
 } as const;

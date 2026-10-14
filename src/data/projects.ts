@@ -191,6 +191,35 @@ export const projects: Project[] = [
     privateRepo: true,
     featured: true,
   },
+  {
+    id: "avmac",
+    index: "07",
+    title: "av-mac",
+    kind: "Real-time screen understanding on macOS",
+    summary:
+      "Reads a live application window with Vision OCR and measured colour thresholds, then drives it with synthesized input. It won't click on a screen it can't name.",
+    blurb:
+      "A macOS agent that understands an interface it has no API for. It captures a window's own backing store, locates controls by text rather than template images, falls back to HSV colour where the UI is icons, and runs a state machine over the result. The domain is a Roblox game; the interesting part is everything between capture and click.",
+    years: "September 2026",
+    tags: ["Computer vision", "macOS", "Automation", "Systems"],
+    meta: [
+      { label: "Role", value: "Sole developer" },
+      { label: "Interface", value: "Native menu-bar app and CLI" },
+      { label: "Verification", value: "200 tests; 79 real captures classified" },
+      { label: "Repository", value: "Open source · MIT" },
+    ],
+    stack: [
+      { group: "Capture", items: ["Python", "CGWindowListCreateImage", "Window backing store", "~33 ms per frame"] },
+      { group: "Reading", items: ["Apple Vision OCR", "Homoglyph normalization", "OpenCV", "HSV colour classification"] },
+      { group: "Deciding", items: ["Screen classifier", "Per-screen handlers", "Two-read confirmation", "Unknown-screen dumps"] },
+      { group: "Control", items: ["CGEventPost", "Global F8 hotkey tap", "Corner abort", "Focus-loss abort", "Action cap"] },
+      { group: "Packaging", items: ["py2app alias bundle", "Self-signed code identity", "TCC permission flow", "AppKit menu bar"] },
+    ],
+    href: "/work/avmac/",
+    repoUrl: "https://github.com/jam2342/av-mac",
+    privateRepo: false,
+    featured: true,
+  },
 ];
 
 export const featuredProjects = projects.filter((p) => p.featured);

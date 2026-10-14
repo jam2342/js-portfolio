@@ -1,0 +1,551 @@
+---
+import Base from "../../layouts/Base.astro";
+import EvidenceStrip from "../../components/EvidenceStrip.astro";
+import Pipeline from "../../components/Pipeline.astro";
+import RouteBands from "../../components/RouteBands.astro";
+import RouteFigure from "../../components/Figure.astro";
+import { projects } from "../../data/projects";
+
+const project = projects.find((p) => p.id === "avmac")!;
+
+const stages = [
+  {
+    n: "01",
+    title: "Capture the window",
+    detail:
+      "CGWindowListCreateImage reads the target window's own backing store, so whatever is stacked on top of it never lands in the frame. Roughly 33 ms per frame, and the application can sit behind other windows the whole time.",
+    note: "A screen-rectangle grab measured 31 ms and returned the wrong pixels whenever anything overlapped.",
+  },
+  {
+    n: "02",
+    title: "Read the text",
+    detail:
+      "Apple's Vision framework returns strings with positions. Everything is located by what it says rather than by matching stored images, which means a window resize or a reskin that keeps the wording does not break it.",
+    note: "Accurate recognition level, with language correction off, because the strings are unit names, not English.",
+  },
+  {
+    n: "03",
+    title: "Classify the screen",
+    detail:
+      "A rule set turns a bag of strings into one answer: which screen is this. Fuzzy token matching, not set equality, because OCR reads the same frame slightly differently every time.",
+    note: "state.classify: the rules live in one file, so a game update has one place to fix.",
+  },
+  {
+    n: "04",
+    title: "Decide",
+    detail:
+      "One handler per screen. Handlers are pure decisions over a parsed frame, which is why the whole decision layer is testable against recorded captures with no game running and no permissions granted.",
+    note: "An unrecognized screen is written to disk, never clicked at.",
+  },
+  {
+    n: "05",
+    title: "Act, then look again",
+    detail:
+      "CGEventPost synthesizes the click. Nothing is fire-and-forget: the next frame has to confirm the click registered, because a click that silently did nothing is the failure mode that strands a long run.",
+    note: "Corner abort, focus-loss abort, and a hard action cap all stop it from outside.",
+  },
+];
+---
+
+<Base
+  title="av-mac, Jamal Mammadzada"
+  description="A case study on real-time screen understanding for macOS: window capture, Vision OCR, measured colour thresholds, and a state machine that refuses to act on screens it cannot name."
+  progress={true}
+>
+  <article>
+    <header class="wrap case-head">
+      <p class="mono"><a href="/work/">Work</a> / Case study {project.index}</p>
+      <h1 class="h-xl case-title">av-mac</h1>
+      <p class="lede narrow case-lede">
+        A macOS agent that understands an interface nobody gave it an API for.
+        It captures a window, reads it with Vision OCR, falls back to measured
+        colour where the interface is icons, and drives it with synthesized
+        input. It happens to be pointed at a game. The interesting part is
+        everything between capture and click.
+      </p>
+
+      <dl class="meta-grid case-meta">
+        {project.meta.map((m) => <div><dt>{m.label}</dt><dd>{m.value}</dd></div>)}
+        <div><dt>Built</dt><dd>{project.years}</dd></div>
+      </dl>
+
+      <p class="note case-note">
+        This automates a Roblox game, which violates Roblox's Terms of Service.
+        The repository says so up front, and so does this page.{" "}
+        <a href="#rules">There's a full section on it below</a>, because
+        deciding what a tool is allowed to do is part of building one.
+      </p>
+    </header>
+
+    <div class="wrap case-proof">
+      <EvidenceStrip
+        label="av-mac evidence"
+        items={[
+          { value: "33 ms", label: "Window capture", detail: "The window's own backing store, not a screen rectangle" },
+          { value: "79 / 79", label: "Captures classified", detail: "Zero unknown across the recorded set" },
+          { value: "200", label: "Tests", detail: "About twelve seconds, no game, no permissions" },
+          { value: "83 GB", label: "Leak, found and fixed", detail: "One Core Graphics call, one overnight run" },
+        ]}
+      />
+    </div>
+
+    <section class="wrap section narrow" aria-labelledby="problem">
+      <h2 class="h-lg sec-title" id="problem">Reading an interface you have no API for</h2>
+      <p>
+        The general problem is more interesting than the specific one. You have a
+        running application. You cannot query it, you cannot read its memory, and
+        you cannot change its code. All you get is what it draws. From that, you
+        have to work out what state it is in and what to do next, reliably
+        enough to run unattended for hours and safely enough that being wrong
+        means doing nothing instead of doing damage.
+      </p>
+      <p>
+        The rule I set at the start was that the macro only ever looks at pixels
+        and only ever sends the input a person could send. No memory reading, no
+        injection, no modified client. That pushes every hard question into
+        computer vision and state modeling, where the answers can be measured,
+        and keeps them out of a debugger, where they'd just be brittle.
+      </p>
+
+      <Pipeline
+        id="avmac-pipeline"
+        label="Capture to click · one tick of the loop"
+        stages={stages}
+      />
+    </section>
+
+    <section class="wrap section narrow" aria-labelledby="text-first">
+      <h2 class="h-lg sec-title" id="text-first">Text first, because text survives</h2>
+      <p>
+        The obvious approach to a UI you can't query is template matching: cut a
+        PNG of each button, then hunt for it. It works right up until the window
+        changes size, at which point you need one template per control per
+        resolution and a small archive of images to maintain.
+      </p>
+      <p>
+        Reading the text instead survives all of that. A resize moves the button;
+        it does not rename it. Coordinates are stored as fractions of the window
+        rather than pixels, so the same rules hold at another size. What it does
+        not survive is the game changing its wording. That's the expected
+        failure mode, so classification rules live in one file and the recorded
+        captures double as the regression suite.
+      </p>
+
+      <p>
+        Reading costs real time, so there are two tiers. Parsing the fixed HUD
+        bands takes about 308 ms; classifying a whole frame takes about 1.01 s.
+        The loop polls the cheap one and pays for the expensive one only when a
+        menu might be open, a restart is due, or a finished stage could be
+        hiding an overlay behind the HUD.
+      </p>
+
+      <div class="checks">
+        <div><span class="mono">01 · Homoglyphs</span><p>Vision returns Cyrillic lookalikes for Latin letters often enough to break exact matching: <code>Epic</code> comes back as <code>Еріс</code>. Everything compared against a known word is folded first.</p></div>
+        <div><span class="mono">02 · Anchoring</span><p>Patterns match substrings and the first hit wins. A rewards list containing "Currency - End run reward" was being found before the <code>End Run</code> button, so button patterns are anchored.</p></div>
+        <div><span class="mono">03 · Jitter</span><p>Screen identity uses fuzzy token matching. One character read differently between frames drops strict set comparison below any sane threshold, and the same screen gets recorded over and over.</p></div>
+      </div>
+
+      <details class="tech">
+        <summary>The exception that proves the anchoring rule</summary>
+        <p>
+          Anchored patterns are right everywhere except one screen, where the
+          button reads <code>New Run (0/1)</code>. An anchored pattern can never
+          match a counter suffix, so that single case is a prefix match. In a
+          diff it looks like an inconsistency, but it's the only pattern that
+          matches.
+        </p>
+      </details>
+    </section>
+
+    <section class="wrap section narrow" aria-labelledby="colour">
+      <h2 class="h-lg sec-title" id="colour">Where text runs out</h2>
+      <p>
+        One screen defeats all of it. The Route Atlas, the map you pick your
+        next floor from, is drawn entirely as icons. There is no text on any
+        node, so OCR returns nothing to click. The only signal left is colour,
+        and the game hands you the encoding itself, in a legend printed beside
+        the map.
+      </p>
+
+      <RouteFigure
+        src="/img/avmac/route-atlas.png"
+        alt="The Odyssey Route Atlas: a branching graph of icon nodes, bright near the centre and dim toward the bottom, with a colour legend printed in a panel on the right."
+        label="Plate 01"
+        caption="One of the sixteen recorded atlas captures. Progression runs up the screen, so the current floor is the lowest bright node and the choices are the bright row directly above it. The dim nodes below are history. A capture like this is where the thresholds came from, and the same file is now a test fixture."
+        width={1200}
+        height={753}
+      />
+
+      <p>
+        Both rules that matter here were measured off that capture, and both
+        are easy to get wrong from first principles. Red is hue 1, not hue 178, because red wraps around
+        zero in OpenCV's 0–180 hue space. And red and white sit at the same hue,
+        so what separates an Elite floor from a Battle floor is saturation: 167
+        against 0.
+      </p>
+
+      <RouteBands />
+
+      <p>
+        The brightness threshold is the one that would have been a silent bug.
+        Visited floors are still drawn, just dimmer, and they sit below the
+        current floor on the screen. Without a value cutoff the macro would
+        happily pick one and route itself backwards through floors it had
+        already played. That's a run that never ends and never progresses, and
+        from the outside it looks exactly like working software.
+      </p>
+    </section>
+
+    <section class="wrap section narrow" aria-labelledby="hours">
+      <h2 class="h-lg sec-title" id="hours">Three failures that only appear hours in</h2>
+      <p>
+        Everything above can be checked in a test. These three could not. Each
+        one only showed up when the thing ran for real, overnight or as an
+        installed application, and each is written down in the repository so
+        nobody, including me, has to rediscover it.
+      </p>
+
+      <div class="fail">
+        <p class="mono fail-n">01 · 83,643 MB</p>
+        <h3 class="h-sm">A leak inside a single Core Graphics call</h3>
+        <p>
+          The macro ran overnight and was killed by macOS. Memory had grown to
+          83,643 MB. The cause was one function: wrapping each captured frame
+          for Vision with <code>CGDataProviderCreateWithData</code> pinned a full
+          ~5.2 MB RGBA buffer per OCR pass, and nothing ever released it. The fix
+          is the CFData variant plus an explicit autorelease pool around every
+          Vision request. On the same route image, the repaired path holds steady
+          at 178–180 MB across OCR passes 20 through 60.
+        </p>
+        <p class="fail-take">
+          A leak this size is invisible for the first twenty minutes. Anything
+          meant to run unattended has to be measured over the duration it will
+          actually run, not the duration you have patience for.
+        </p>
+      </div>
+
+      <div class="fail">
+        <p class="mono fail-n">02 · exec</p>
+        <h3 class="h-sm">A shell-script bundle cannot hold a permission</h3>
+        <p>
+          The first version of the menu-bar app was an application bundle whose
+          executable was a small script that <code>exec</code>'d Python. It
+          launched, the menu appeared, everything looked right, and every
+          permission stayed unchecked no matter how many times I granted it in
+          System Settings.
+        </p>
+        <p>
+          <code>exec</code> replaces the process. So the thing macOS sees asking
+          for Screen Recording is the Python framework binary, not the
+          application. The identity the user granted and the identity making the
+          request are two different programs. A bundle has to{" "}
+          <em>contain</em> the executable that actually runs.
+        </p>
+        <p class="fail-take">
+          Diagnosed from a log file, because py2app sends stdout to the unified
+          log where nobody looks. The app now writes to
+          <code>~/Library/Logs/</code> whenever it isn't attached to a terminal.
+        </p>
+      </div>
+
+      <div class="fail">
+        <p class="mono fail-n">03 · cdhash</p>
+        <h3 class="h-sm">Ad-hoc signatures are derived from content</h3>
+        <p>
+          macOS ties permission grants to an application's code signature. An
+          ad-hoc signature puts content hashes into the designated requirement,
+          which means every rebuild is a different application as far as the
+          permission database is concerned. Grant Screen Recording, change one
+          line, rebuild, and the grant is silently gone.
+        </p>
+        <p>
+          That failure is worse than it sounds, because the macro does not crash
+          without Screen Recording. It runs perfectly and sees a blank frame. The
+          fix is a self-signed certificate, so the requirement depends on the
+          bundle identifier and the certificate instead of the file contents. I
+          verified it by rebuilding after a real change to a source file and
+          diffing the requirement: byte-identical.
+        </p>
+        <p class="fail-take">
+          The build script creates that certificate itself. Two things about it
+          look like problems and are not: the identity reports as untrusted, and
+          signing works anyway, because trust governs verification of downloaded
+          applications and this one is never distributed.
+        </p>
+      </div>
+    </section>
+
+    <section class="wrap section narrow" aria-labelledby="silent">
+      <h2 class="h-lg sec-title" id="silent">The failure that doesn't raise an error</h2>
+      <p>
+        Without Screen Recording, macOS does not return an error. It returns a
+        blank frame. The macro then runs happily, reads nothing, decides nothing,
+        and clicks nowhere, which from the outside is indistinguishable from a
+        bug in the vision code you are about to spend an evening not finding.
+      </p>
+
+      <RouteFigure
+        src="/img/avmac/menu-bar-app.png"
+        alt="The av-mac menu bar panel, showing a stopped state, a note that Roblox is not running, Start, Session, Settings, and permission rows for Screen Recording and Accessibility, both checked."
+        label="Plate 02"
+        caption="The permission rows are clickable on purpose. Opening the System Settings pane by hand is not enough: an application that has never requested a permission is not listed there at all, so the row has to make the request itself."
+        width={600}
+        height={646}
+        aside={true}
+      />
+      <p>
+        There is an API that is supposed to tell you whether you have the
+        permission. On this machine it returns false while capture works
+        perfectly. So nothing asks; everything checks behaviourally. The
+        diagnostic command walks the whole chain (interpreter, packages, both
+        permissions, the window, capture, OCR, classification), and the capture
+        step inspects the pixel range of the frame it just took. A frame with no
+        range is the blank-frame failure, and it gets reported by name instead
+        of showing up as a mystery.
+      </p>
+      <p>
+        The diagnostic sends no input at all, which is what makes it usable. You
+        can run it any time, including while trying to work out whether the thing
+        is broken or the game just changed.
+      </p>
+    </section>
+
+    <section class="wrap section narrow" aria-labelledby="refuse">
+      <h2 class="h-lg sec-title" id="refuse">What it refuses to do</h2>
+      <p>
+        An automation loop that guesses is worse than one that stops. Most of the
+        design decisions here are about narrowing what the macro is willing to do
+        when it is unsure.
+      </p>
+
+      <div class="checks">
+        <div><span class="mono">Unknown</span><p>A screen the classifier cannot name is written to disk as a PNG and its OCR dump, and nothing is clicked. Every new one is a bug report with the evidence already attached.</p></div>
+        <div><span class="mono">Two reads</span><p>A floor number only updates after two consecutive consistent readings. A single misread used to latch permanently and re-trigger a restart on every later poll.</p></div>
+        <div><span class="mono">Bounded</span><p>Recovery attempts are counted, not retried forever. After three failed attempts to close a stuck menu the runner exits rather than clicking into a state it does not understand.</p></div>
+        <div><span class="mono">Outside</span><p>Three independent stops that don't depend on the loop being healthy: the pointer in any screen corner, the game losing focus, and a hard cap on total actions.</p></div>
+      </div>
+
+      <p>
+        The tests are written against the same principle. They pin the reasoning
+        rather than the behaviour, and every test that exists because of a real
+        bug is named after the bug, so the diff that breaks one tells you which
+        mistake you are about to repeat.
+      </p>
+
+      <ul class="tests" role="list">
+        <li>
+          <p class="mono">test_single_floor_misread_cannot_latch</p>
+          <p>One bad reading used to stick permanently and re-trigger a restart forever.</p>
+        </li>
+        <li>
+          <p class="mono">test_restart_does_not_thrash</p>
+          <p>The restart trigger disarms after firing and only re-arms on a confirmed lower floor.</p>
+        </li>
+        <li>
+          <p class="mono">test_impossible_wave_maxima_are_dropped</p>
+          <p>The game's outlined <code>5</code> reads as a <code>3</code>. A maximum below the current value is dropped, not believed.</p>
+        </li>
+      </ul>
+    </section>
+
+    <section class="wrap section narrow" aria-labelledby="verified">
+      <h2 class="h-lg sec-title" id="verified">What is verified, and what isn't</h2>
+      <p>
+        Reading and deciding are verified thoroughly, because recorded captures
+        make that cheap. Acting is verified much less, because every check costs
+        a real run. Both lists are below, and the second one is longer.
+      </p>
+
+      <div class="split">
+        <div class="split-col">
+          <p class="mono split-h">Verified against real pixels</p>
+          <ul role="list">
+            <li>All 79 captures classify correctly. Zero unknown.</li>
+            <li>A destination picked on 16 of 16 real atlas captures.</li>
+            <li>Floor number read on 45 of 47 in-match frames, range 1–18.</li>
+            <li>The full cash-out sequence landed on a live run, three clicks deep.</li>
+            <li>The installed application drove a real run and routed two floors.</li>
+          </ul>
+        </div>
+        <div class="split-col">
+          <p class="mono split-h">Not verified yet</p>
+          <ul role="list">
+            <li>The card handler has never actually clicked a card. Its offset is reasoned from one screenshot, not measured.</li>
+            <li>Three screen handlers may belong to an older game mode that no longer exists. Kept as safety nets, not claimed as features.</li>
+            <li>The treasure exclusion has only been proven against recorded captures; no live atlas has offered one yet.</li>
+            <li>Everything is measured on one machine, one macOS version, one window size.</li>
+          </ul>
+        </div>
+      </div>
+
+      <p>
+        So when I say it should work at other window sizes, that's reasoning,
+        not a test result.
+      </p>
+    </section>
+
+    <section class="wrap section narrow" aria-labelledby="rules">
+      <h2 class="h-lg sec-title" id="rules">The rules it breaks</h2>
+      <p>
+        Automating a Roblox game violates Roblox's Terms of Service. An account
+        running this can get banned, and clicking on a regular cadence for hours
+        is exactly the pattern enforcement looks for. Nothing here is designed to be undetectable, and nothing here should
+        be treated as though it were.
+      </p>
+      <p>
+        I'm publishing it anyway, with the warning at the top of the repository.
+        The parts worth reading (window capture, OCR-driven state modeling,
+        colour classification, the macOS permission model, and keeping track of
+        what you tested versus what you assumed) work the same whether the
+        window belongs to a game or to anything else.
+      </p>
+      <p>
+        There is a smaller commitment in it too. The recorded captures ship with
+        the account name painted out, and the repository says to check your
+        screenshots before attaching them to an issue. A debugging tool that
+        collects screenshots is a tool that collects whatever was on screen.
+      </p>
+    </section>
+
+    <section class="wrap section narrow" aria-labelledby="limits">
+      <h2 class="h-lg sec-title" id="limits">What remains unsolved</h2>
+      <p>
+        The whole capture, OCR, and input stack is macOS frameworks, so it only
+        runs on a Mac. Unit placement isn't automated, because the game's own
+        automation handles it and a per-map coordinate database would be a lot
+        of work for a mode that doesn't need it. And a game update that changes wording or layout
+        will break screen detection. That is the expected failure mode, which is
+        why the fix path is one file of rules and a set of captures that can be
+        re-classified in a few seconds.
+      </p>
+    </section>
+
+    <nav class="wrap section case-next" aria-label="More work">
+      <a href="/work/frcmob/" class="next-link">
+        <span class="mono">Back to the first case study</span>
+        <span class="h-md">FRCMOB →</span>
+      </a>
+    </nav>
+  </article>
+</Base>
+
+<style>
+  .case-head { padding-top: clamp(2.5rem, 6vw, 4.5rem); }
+  .case-head > .mono { margin-bottom: 1.4rem; }
+  .case-title { margin-bottom: 1.5rem; }
+  .case-lede { margin-bottom: 2.5rem; }
+  .case-meta { max-width: 38rem; margin-bottom: 1.75rem; }
+  .case-note { max-width: 62ch; }
+  .case-proof { margin-top: clamp(2.5rem, 6vw, 4.5rem); }
+  .sec-title { margin-bottom: 1.5rem; }
+
+  .checks { display: grid; gap: 0.7rem; margin: 1.7rem 0; }
+  .checks > div { display: grid; grid-template-columns: 8rem 1fr; gap: 1rem; border-top: 1px solid var(--rule); padding-top: 0.8rem; }
+  .checks .mono { color: var(--accent); font-size: var(--fs-label); }
+  .checks p { margin: 0; color: var(--ink-2); font-size: var(--fs-ui); }
+
+  /* One failure per block: number, what broke, then what it taught. */
+  .fail {
+    border-top: 1px solid var(--rule);
+    padding-top: 1.1rem;
+    margin-top: 2rem;
+  }
+
+  .fail-n { color: var(--accent); margin-bottom: 0.7rem; }
+  .fail h3 { margin-bottom: 0.8rem; }
+  .fail p { color: var(--ink-2); }
+
+  .fail-take {
+    border-left: 2px solid var(--rule-2);
+    padding-left: 1rem;
+    font-size: var(--fs-ui);
+    color: var(--ink-3);
+  }
+
+  /* Test names are long identifiers; they get their own line so they never
+     have to break mid-word against a description. */
+  .tests {
+    list-style: none;
+    margin: 1.7rem 0;
+    padding: 0;
+    border-top: 1px solid var(--rule);
+  }
+
+  .tests li {
+    border-bottom: 1px solid var(--rule);
+    padding: 0.75rem 0 0.8rem;
+  }
+
+  .tests .mono {
+    color: var(--accent);
+    font-size: var(--fs-label);
+    text-transform: none;
+    letter-spacing: 0.02em;
+    overflow-wrap: anywhere;
+  }
+
+  .tests li p:last-child {
+    margin: 0.35rem 0 0;
+    color: var(--ink-2);
+    font-size: var(--fs-ui);
+  }
+
+  .split {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 1px;
+    background: var(--rule);
+    border: 1px solid var(--rule);
+    margin: 2rem 0;
+  }
+
+  .split-col { background: var(--paper-2); padding: clamp(1.1rem, 2.5vw, 1.5rem); }
+  .split-h { color: var(--accent); margin-bottom: 1rem; }
+
+  .split ul {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: grid;
+    gap: 0.7rem;
+  }
+
+  .split li {
+    color: var(--ink-2);
+    font-size: var(--fs-ui);
+    line-height: 1.5;
+    padding-left: 1rem;
+    position: relative;
+  }
+
+  .split li::before {
+    content: "";
+    position: absolute;
+    left: 0;
+    top: 0.62em;
+    width: 5px;
+    height: 1px;
+    background: var(--rule-2);
+  }
+
+  code {
+    font-family: var(--mono);
+    font-size: 0.86em;
+    background: var(--accent-wash);
+    color: var(--accent-ink);
+    padding: 0.12em 0.36em;
+    border-radius: var(--radius);
+    /* Long API identifiers must not push the column wider on small screens. */
+    overflow-wrap: anywhere;
+  }
+
+  .case-next { border-top: 1px solid var(--rule); }
+  .next-link { display: grid; gap: 0.5rem; text-decoration: none; color: inherit; padding: 1.5rem 0; }
+  .next-link .h-md { transition: color 0.16s ease; }
+  .next-link:hover .h-md { color: var(--accent); }
+
+  @media (max-width: 760px) {
+    .checks > div { grid-template-columns: 1fr; gap: 0.35rem; }
+    .split { grid-template-columns: 1fr; }
+  }
+</style>
